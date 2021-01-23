@@ -7,5 +7,5 @@ data class Video(
     val id: Long,
     val title: String,
     val fileName: String,
-    val dateOfUpload: LocalDateTime
+    val dateOfUpload: String
 )
