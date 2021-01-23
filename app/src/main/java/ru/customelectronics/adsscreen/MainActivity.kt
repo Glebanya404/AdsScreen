@@ -1,6 +1,7 @@
 package ru.customelectronics.adsscreen
 
 import android.os.Bundle
+import android.util.Log
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
@@ -10,10 +11,17 @@ import androidx.lifecycle.*
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import kotlinx.android.synthetic.main.activity_main.*
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import ru.customelectronics.adsscreen.model.Video
-import ru.customelectronics.adsscreen.repository.Repository
+import ru.customelectronics.adsscreen.repository.ServerRepository
+import ru.customelectronics.adsscreen.repository.SqlRepository
+import ru.customelectronics.adsscreen.room.AppDatabase
+import java.io.File
 import java.net.NetworkInterface
 import java.util.*
+import kotlin.concurrent.thread
 
 class MainActivity : AppCompatActivity() {
 
@@ -28,29 +36,31 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
 
-        val repository = Repository()
-        val viewModelFactory = MainViewModelFactory(repository)
+        val videoDao = AppDatabase.getDatabase(applicationContext).videoDao()
+        val viewModelFactory = MainViewModelFactory(ServerRepository(), SqlRepository(videoDao), "${getExternalFilesDir(null)}${File.separator}")
         viewModel = ViewModelProvider(this, viewModelFactory).get(MainViewModel::class.java)
 
         activity_main__macAddress_textView.text = macAddress
         activity_main__connStatus_textView.text = "Status:Not connected"
         activity_main__videoList_recyclerView.layoutManager = LinearLayoutManager(this)
-        val adapter = VideoAdapter(viewModel.videoList)
+        val adapter = VideoAdapter()
         activity_main__videoList_recyclerView.adapter = adapter
 
 
-
         viewModel.checkServerUpdate()
-
-
 
 
         viewModel.connectionState.observe(this){
             activity_main__connStatus_textView.text = "Status: ${it.msg}"
 
         }
-        viewModel.videoList.observe(this, {
-            adapter.notifyDataSetChanged()
+        viewModel.serverVideoList.observe(this, {
+            adapter.setVideoList(it)
+        })
+        viewModel.sqlVideoList.observe(this, { videoList ->
+            for (video in videoList) {
+                Log.d(TAG, "onCreate: From SQL: $video")
+            }
         })
 //        button_post.setOnClickListener {
 //            val password = password_editText.text.toString()
@@ -127,7 +137,9 @@ class MainActivity : AppCompatActivity() {
         return "02:00:00:00:00:00"
     }
 
-    inner class VideoAdapter(val videoList: MutableLiveData<List<Video>>): RecyclerView.Adapter<VideoAdapter.ViewHolder>() {
+    inner class VideoAdapter: RecyclerView.Adapter<VideoAdapter.ViewHolder>() {
+
+        private var videoList = emptyList<Video>()
 
         override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): VideoAdapter.ViewHolder {
             val itemView = LayoutInflater.from(parent.context).inflate(R.layout.video_item_view, parent, false)
@@ -135,12 +147,17 @@ class MainActivity : AppCompatActivity() {
         }
 
         override fun onBindViewHolder(holder: VideoAdapter.ViewHolder, position: Int) {
-            holder.titleTV?.text = videoList.value!![position].title
-            holder.fileNameTV?.text = videoList.value!![position].fileName
-            holder.dateTV?.text = videoList.value!![position].dateOfUpload
+            holder.titleTV?.text = videoList[position].title
+            holder.fileNameTV?.text = videoList[position].fileName
+            holder.dateTV?.text = videoList[position].dateOfUpload
         }
 
-        override fun getItemCount() = videoList.value?.size ?: 0
+        override fun getItemCount() = videoList.size
+
+        fun setVideoList(newVideoList: List<Video>) {
+            this.videoList = newVideoList
+            notifyDataSetChanged()
+        }
 
         inner class ViewHolder(itemView: View): RecyclerView.ViewHolder(itemView) {
             var titleTV: TextView? = null

@@ -2,90 +2,130 @@ package ru.customelectronics.adsscreen
 
 import android.util.Log
 import androidx.lifecycle.*
-import com.google.gson.JsonObject
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
+import kotlinx.coroutines.launch
 import okhttp3.ResponseBody
+import retrofit2.Callback
 import org.json.JSONObject
 import retrofit2.Call
-import retrofit2.Callback
 import retrofit2.Response
 import ru.customelectronics.adsscreen.retrofit.RetrofitInstance
 import ru.customelectronics.adsscreen.model.User
 import ru.customelectronics.adsscreen.model.Video
-import ru.customelectronics.adsscreen.repository.Repository
+import ru.customelectronics.adsscreen.repository.ServerRepository
+import ru.customelectronics.adsscreen.repository.SqlRepository
 import java.io.*
+import java.lang.Exception
+import kotlin.concurrent.thread
 
-class MainViewModel(private val repository: Repository): ViewModel() {
+class MainViewModel(private val serverRepository: ServerRepository, val sqlRepository: SqlRepository, val filesDir: String): ViewModel() {
 
     enum class ConnectionState (val msg: String){
-        CONNECTED("Connected"),
+        READY("Ready"),
+        WORKING("Work in progress"),
         NOT_CONNECTED("Not connected"),
-        ERROR401("Incorrect password")
+        ERROR401("Incorrect password"),
+        ERROR("Error")
     }
 
+    val serverController = ServerController()
+    val sqlController = SqlController()
+
     val connectionState: MutableLiveData<ConnectionState> = MutableLiveData()
-    val videoList: MutableLiveData<List<Video>> = MutableLiveData()
+    val serverVideoList: MutableLiveData<List<Video>> = MutableLiveData()
+    val sqlVideoList = sqlRepository.getAll
 
     val TAG = javaClass.name
 
 
 
     fun checkServerUpdate() {
-        getServerVideoList()
-    }
-
-    fun getJwt() {
-        val signInCall = repository.signIn(User("foo", "foo"))
-        signInCall.enqueue(object : Callback<JsonObject> {
-            override fun onResponse(call: Call<JsonObject>, response: Response<JsonObject>) {
-                if (response.isSuccessful) {
-                    RetrofitInstance.jwt = JSONObject(response.body().toString()).getString("jwt")
-                }
-                connectionState.value = ConnectionState.CONNECTED
-            }
-
-            override fun onFailure(call: Call<JsonObject>, t: Throwable) {
-                Log.d(TAG, "onFailure: ${t.message}")
-                connectionState.value = ConnectionState.NOT_CONNECTED
-            }
-        })
-    }
-
-    fun getServerVideoList() {
-        val getVideosCall = repository.getVideos()
-        getVideosCall.enqueue(object : Callback<List<Video>> {
-            override fun onResponse(call: Call<List<Video>>, response: Response<List<Video>>) {
-                if (response.isSuccessful) {
-                    videoList.value = response.body()
-                    connectionState.value = ConnectionState.CONNECTED
-                } else if (response.code() == 401 && connectionState.value == ConnectionState.CONNECTED) {
-                    connectionState.value = ConnectionState.ERROR401
-                    getJwt()
-                    getServerVideoList()
-                } else if (connectionState.value == ConnectionState.ERROR401){
-
+        viewModelScope.launch {
+            if (connectionState.value == ConnectionState.NOT_CONNECTED) {
+                try {
+                    serverController.getJwt()
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                    return@launch
                 }
             }
-            override fun onFailure(call: Call<List<Video>>, t: Throwable) {
-                connectionState.value = ConnectionState.NOT_CONNECTED
-            }
-        })
-    }
 
-    fun getVideo(number: Int) {
-
-    }
-
-
-    fun downloadVideo(id: Int, fileDir: String) {
-
-    }
-
-    private suspend fun writeResponseBodyToDisk(body: ResponseBody, fileDir: String): Boolean {
-        return withContext(Dispatchers.IO) {
             try {
-                val videoFile = File( "$fileDir${File.separator}video.mp4")
+                connectionState.value = ConnectionState.WORKING
+
+                serverController.getServerVideoList()//Get current video list
+                val toDownloadVideoList = findNotDownloadedVideo()// Find new videos
+                for (video in toDownloadVideoList) {
+                        serverController.downloadVideo(video)//Download each new video
+                }
+
+                connectionState.value = ConnectionState.READY
+            } catch (e: Exception) {
+                e.printStackTrace()
+                connectionState.value = ConnectionState.NOT_CONNECTED
+            }
+        }
+    }
+
+
+    private fun findNotDownloadedVideo(): List<Video> {
+        if (serverVideoList.value == null || serverVideoList.value!!.isEmpty()) return emptyList()
+        if (sqlVideoList.value == null || sqlVideoList.value!!.isEmpty()) return serverVideoList.value!!
+        return serverVideoList.value!!.filter { !sqlVideoList.value!!.contains(it)}
+    }
+
+
+
+    inner class ServerController() {
+        suspend fun getJwt() {
+            val response = serverRepository.getJwt(User("foo", "foo"))
+            if (response.isSuccessful) {
+                RetrofitInstance.jwt = JSONObject(response.body().toString()).getString("jwt")
+            } else {
+                connectionState.value = ConnectionState.ERROR
+            }
+        }
+
+        suspend fun getServerVideoList() {
+            val response = serverRepository.getVideos()
+            if (response.isSuccessful) {
+                serverVideoList.value = response.body()
+            } else if (response.code() == 401 && connectionState.value != ConnectionState.ERROR401) {
+                connectionState.value = ConnectionState.ERROR401
+                getJwt()
+                getServerVideoList()
+            }
+        }
+
+        fun downloadVideo(video: Video) {
+            val response = serverRepository.downloadVideo(video.id)
+            response.enqueue(object: Callback<ResponseBody> {
+                override fun onResponse(call: Call<ResponseBody>, response: Response<ResponseBody>) {
+                    if (response.isSuccessful){
+                        thread {
+                            val success = writeResponseBodyToDisk(response.body()!!, filesDir, video.fileName)
+                            Log.d(TAG, "downloadVideo: Video${video.id} download->$success")
+                            video.isDownloaded = true
+                            if (success) SqlController().addVideo(video)
+                        }
+                    }
+                }
+                override fun onFailure(call: Call<ResponseBody>, t: Throwable) {
+                    throw t
+                }
+
+            })
+
+
+        }
+
+        private fun writeResponseBodyToDisk(
+            body: ResponseBody,
+            filesDir: String,
+            fileName: String
+        ): Boolean {
+            return try {
+                Log.d(TAG, "writeResponseBodyToDisk: Start")
+                val videoFile = File( "$filesDir${File.separator}$fileName")
 
                 var inputStream: InputStream? = null
                 var outputStream: OutputStream? = null
@@ -103,7 +143,7 @@ class MainViewModel(private val repository: Repository): ViewModel() {
                         if (read == -1)break
                         outputStream.write(fileReader, 0, read)
                         fileSizeDownloaded+=read
-                        //Log.d(TAG, "writeResponseBodyToDisk: File download: $fileSizeDownloaded of $fileSize")
+                        Log.d(TAG, "writeResponseBodyToDisk: File download: $fileSizeDownloaded of $fileSize")
                     }
                     outputStream.flush()
                     true
@@ -118,4 +158,15 @@ class MainViewModel(private val repository: Repository): ViewModel() {
             }
         }
     }
+
+    inner class SqlController() {
+        fun addVideo(video: Video) {
+            viewModelScope.launch {
+                sqlRepository.addVideo(video)
+            }
+        }
+    }
+
+
 }
+

@@ -8,21 +8,18 @@ import ru.customelectronics.adsscreen.retrofit.RetrofitInstance
 import ru.customelectronics.adsscreen.model.User
 import ru.customelectronics.adsscreen.model.Video
 
-class Repository {
+class ServerRepository {
 
-    fun getVideos(): Call<List<Video>> {
+    suspend fun getVideos(): Response<List<Video>> {
         return RetrofitInstance.api.getVideos()
     }
 
-    fun getVideo(number: Int): Call<Video> {
-        return RetrofitInstance.api.getVideo(number)
+
+    suspend fun getJwt(user: User): Response<JsonObject> {
+        return RetrofitInstance.api.getJwt(user)
     }
 
-    fun signIn(user: User): Call<JsonObject> {
-        return RetrofitInstance.api.signIn(user)
-    }
-
-    fun downloadVideo(id: Int): Call<ResponseBody> {
+    fun downloadVideo(id: Long): Call<ResponseBody> {
         return RetrofitInstance.api.downloadVideo(id)
     }
 }

@@ -48,6 +48,13 @@ dependencies {
 //    implementation 'org.jetbrains.kotlinx:kotlinx-coroutines:0.19.2'
     implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.4.2'
     implementation 'androidx.lifecycle:lifecycle-viewmodel-ktx:2.3.0-rc01'
+    implementation 'androidx.room:room-runtime:2.2.6'
+    implementation 'com.google.android.material:material:1.2.1'
+    implementation 'android.arch.persistence.room:runtime:1.1.1'
+    annotationProcessor 'android.arch.lifecycle:compiler:1.1.1'
+    apply plugin: 'kotlin-kapt'
+    kapt 'androidx.room:room-compiler:2.2.6'
+    implementation 'androidx.room:room-ktx:2.2.6'
 
     testImplementation 'junit:junit:4.+'
     androidTestImplementation 'androidx.test.ext:junit:1.1.2'

@@ -11,23 +11,19 @@ import ru.customelectronics.adsscreen.model.Video
 interface SimpleApi {
 
     @GET("api")
-    fun getVideos(): Call<List<Video>>
+    suspend fun getVideos(): Response<List<Video>>
 
-    @GET("api/{videoNumber}")
-    fun getVideo(
-        @Path("videoNumber") number: Int
-    ): Call<Video>
 
     @Streaming
     @GET("api/download/{id}")
     fun downloadVideo(
-            @Path("id") id: Int
+            @Path("id") id: Long
     ): Call<ResponseBody>
 
 
     @POST("api/authenticate")
-    fun signIn(
+    suspend fun getJwt(
         @Body user: User
-    ): Call<JsonObject>
+    ): Response<JsonObject>
 
 }
