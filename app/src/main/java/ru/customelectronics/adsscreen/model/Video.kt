@@ -11,8 +11,7 @@ data class Video(
     val id: Long,
     val title: String,
     val fileName: String,
-    val dateOfUpload: String,
-    var isDownloaded: Boolean = false
+    val dateOfUpload: String
 ){
     override fun equals(other: Any?): Boolean {
         if (other is Video) return this.id == other.id

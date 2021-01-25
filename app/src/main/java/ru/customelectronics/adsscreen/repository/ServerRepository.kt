@@ -7,19 +7,24 @@ import retrofit2.Response
 import ru.customelectronics.adsscreen.retrofit.RetrofitInstance
 import ru.customelectronics.adsscreen.model.User
 import ru.customelectronics.adsscreen.model.Video
+import java.util.*
 
-class ServerRepository {
+class ServerRepository(private val macAddr: String) {
 
     suspend fun getVideos(): Response<List<Video>> {
-        return RetrofitInstance.api.getVideos()
+        return RetrofitInstance.api.getVideos(macAddr)
     }
 
 
     suspend fun getJwt(user: User): Response<JsonObject> {
-        return RetrofitInstance.api.getJwt(user)
+        return RetrofitInstance.api.getJwt(macAddr,user)
     }
 
     fun downloadVideo(id: Long): Call<ResponseBody> {
         return RetrofitInstance.api.downloadVideo(id)
+    }
+
+    suspend fun getVideoQueue(): Response<Queue<Video>> {
+        return RetrofitInstance.api.getVideoQueue(macAddr)
     }
 }

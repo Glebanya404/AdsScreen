@@ -7,11 +7,12 @@ import retrofit2.Response
 import retrofit2.http.*
 import ru.customelectronics.adsscreen.model.User
 import ru.customelectronics.adsscreen.model.Video
+import java.util.*
 
 interface SimpleApi {
 
-    @GET("api")
-    suspend fun getVideos(): Response<List<Video>>
+    @GET("api/getFor")
+    suspend fun getVideos(@Query("macAddr") macAddr: String): Response<List<Video>>
 
 
     @Streaming
@@ -23,7 +24,11 @@ interface SimpleApi {
 
     @POST("api/authenticate")
     suspend fun getJwt(
+        @Query("macAddr") macAddr: String,
         @Body user: User
     ): Response<JsonObject>
+
+    @GET("api/getQueue")
+    suspend fun getVideoQueue( @Query("macAddr") macAddr: String): Response<Queue<Video>>
 
 }

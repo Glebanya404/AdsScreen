@@ -37,7 +37,7 @@ class MainActivity : AppCompatActivity() {
         setContentView(R.layout.activity_main)
 
         val videoDao = AppDatabase.getDatabase(applicationContext).videoDao()
-        val viewModelFactory = MainViewModelFactory(ServerRepository(), SqlRepository(videoDao), "${getExternalFilesDir(null)}${File.separator}")
+        val viewModelFactory = MainViewModelFactory(ServerRepository(macAddress), SqlRepository(videoDao), "${getExternalFilesDir(null)}${File.separator}")
         viewModel = ViewModelProvider(this, viewModelFactory).get(MainViewModel::class.java)
 
         activity_main__macAddress_textView.text = macAddress
@@ -46,74 +46,50 @@ class MainActivity : AppCompatActivity() {
         val adapter = VideoAdapter()
         activity_main__videoList_recyclerView.adapter = adapter
 
+        activity_main__showVideoButton.setOnClickListener {
+            if (activity_main__videoView.visibility == View.INVISIBLE) {
+                activity_main__videoView.setVideoPath(viewModel.getNextVideo())
+                activity_main__videoView.visibility = View.VISIBLE
+                activity_main__videoView.start()
+            }
+            else {
+                activity_main__videoView.stopPlayback()
+                activity_main__videoView.visibility = View.INVISIBLE
+            }
+        }
 
-        viewModel.checkServerUpdate()
+        activity_main__videoView.setMediaController(null)
+        activity_main__videoView.setOnCompletionListener {
+            activity_main__videoView.setVideoPath(viewModel.getNextVideo())
+            activity_main__videoView.start()
+        }
+        activity_main__videoView.setOnErrorListener { mediaPlayer, i, i2 ->
+            Log.d(TAG, "onCreate: Error while trya paly video")
+            return@setOnErrorListener true
+        }
 
 
         viewModel.connectionState.observe(this){
             activity_main__connStatus_textView.text = "Status: ${it.msg}"
-
         }
-        viewModel.serverVideoList.observe(this, {
-            adapter.setVideoList(it)
-        })
         viewModel.sqlVideoList.observe(this, { videoList ->
             for (video in videoList) {
                 Log.d(TAG, "onCreate: From SQL: $video")
             }
+            adapter.setVideoList(videoList)
         })
-//        button_post.setOnClickListener {
-//            val password = password_editText.text.toString()
-//            viewModel.signIn(User("foo", password))
-//        }
-//        viewModel.signInResponse.observe(this, Observer { response ->
-//            if (response.isSuccessful) {
-//                RetrofitInstance.jwt = JSONObject(response.body().toString()).getString("jwt")
-//                Log.d("Response", RetrofitInstance.jwt)
-//            }
-//            Log.d("Response", response.code().toString())
-//        })
-//
-//        button_get.setOnClickListener{
-//            val id = id_editText.text.toString()
-//            if (id == "") return@setOnClickListener
-//            viewModel.getVideo(Integer.parseInt(id))
-//
-//        }
-//        viewModel.videoResponse.observe(this, Observer { response ->
-//            if (response.isSuccessful) {
-//                textView.text = response.body().toString()
-//            } else {
-//                textView.text = response.code().toString()
-//            }
-//        })
-//
-//        button_getall.setOnClickListener {
-//            viewModel.getVideos()
-//        }
-//        viewModel.videosResponse.observe(this, { response ->
-//            if (response.isSuccessful) {
-//                textView.text = response.body().toString()
-//                response.body()?.forEach {
-//                    Log.d(TAG, "onCreate: $it")
-//                }
-//            } else {
-//                textView.text = response.code().toString()
-//            }
-//        })
-//
-//        button_download.setOnClickListener {
-//            val id = id_editText.text.toString()
-//            if (id == "") return@setOnClickListener
-//            viewModel.downloadVideo(Integer.parseInt(id), getExternalFilesDir(null).toString())
-//        }
-//        viewModel.downloadResponse.observe(this, { response ->
-//            if (response.isSuccessful) {
-//
-//            } else {
-//                textView.text = response.code().toString()
-//            }
-//        })
+        viewModel.defaultQueue.observe(this, {
+            if (activity_main__videoView.duration == -1 && viewModel.defaultQueue.value?.size != 0) {
+                activity_main__videoView.setVideoPath(viewModel.getNextVideo())
+                activity_main__videoView.visibility = View.VISIBLE
+                activity_main__videoView.start()
+            }
+        })
+
+
+        viewModel.checkServerUpdate()
+
+
     }
     fun getMacAddr(): String {
         try {

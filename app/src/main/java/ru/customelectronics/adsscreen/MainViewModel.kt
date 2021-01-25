@@ -2,6 +2,9 @@ package ru.customelectronics.adsscreen
 
 import android.util.Log
 import androidx.lifecycle.*
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
 import kotlinx.coroutines.launch
 import okhttp3.ResponseBody
 import retrofit2.Callback
@@ -15,7 +18,9 @@ import ru.customelectronics.adsscreen.repository.ServerRepository
 import ru.customelectronics.adsscreen.repository.SqlRepository
 import java.io.*
 import java.lang.Exception
+import java.util.*
 import kotlin.concurrent.thread
+import kotlin.math.log
 
 class MainViewModel(private val serverRepository: ServerRepository, val sqlRepository: SqlRepository, val filesDir: String): ViewModel() {
 
@@ -27,41 +32,54 @@ class MainViewModel(private val serverRepository: ServerRepository, val sqlRepos
         ERROR("Error")
     }
 
-    val serverController = ServerController()
+    private val serverController = ServerController()
     val sqlController = SqlController()
 
     val connectionState: MutableLiveData<ConnectionState> = MutableLiveData()
     val serverVideoList: MutableLiveData<List<Video>> = MutableLiveData()
-    val sqlVideoList = sqlRepository.getAll
+    var defaultQueue: MutableLiveData<Queue<Video>> = MutableLiveData()
+    var currentQueue: Queue<Video> = LinkedList(listOf())
+    var sqlVideoList = sqlRepository.getAll
 
     val TAG = javaClass.name
 
 
 
     fun checkServerUpdate() {
-        viewModelScope.launch {
-            if (connectionState.value == ConnectionState.NOT_CONNECTED) {
+        CoroutineScope(Dispatchers.IO).launch {
+            //If not connected trya to connect
+            if (connectionState.value != ConnectionState.READY) {
                 try {
                     serverController.getJwt()
                 } catch (e: Exception) {
+                    connectionState.postValue(ConnectionState.ERROR)
+//                    throw e
                     e.printStackTrace()
                     return@launch
                 }
             }
-
             try {
-                connectionState.value = ConnectionState.WORKING
-
-                serverController.getServerVideoList()//Get current video list
+                Log.d(TAG, "checkServerUpdate: getServerVideoList")
+                serverVideoList.postValue(serverController.getServerVideoList())//Get current video list
+                Log.d(TAG, "checkServerUpdate: findNotDownloadedVideo")
                 val toDownloadVideoList = findNotDownloadedVideo()// Find new videos
+                Log.d(TAG, "checkServerUpdate: Download videos")
+                Log.d(TAG, "checkServerUpdate: $toDownloadVideoList")
                 for (video in toDownloadVideoList) {
+                    val async = async {
+                        Log.d(TAG, "checkServerUpdate: Start download ${video.title}")
                         serverController.downloadVideo(video)//Download each new video
+                    }
+                    Log.d(TAG, "checkServerUpdate: Waiting")
+                    async.await()
                 }
+                defaultQueue.postValue(serverController.getVideoQueue())
 
-                connectionState.value = ConnectionState.READY
+                connectionState.postValue(ConnectionState.READY)
             } catch (e: Exception) {
+                connectionState.postValue(ConnectionState.ERROR)
+//                throw e
                 e.printStackTrace()
-                connectionState.value = ConnectionState.NOT_CONNECTED
             }
         }
     }
@@ -73,49 +91,47 @@ class MainViewModel(private val serverRepository: ServerRepository, val sqlRepos
         return serverVideoList.value!!.filter { !sqlVideoList.value!!.contains(it)}
     }
 
+    fun getNextVideo(): String {
+        if (currentQueue.size == 0){
+            currentQueue = LinkedList(defaultQueue.value ?: listOf())
+        }
+        val video = currentQueue.poll()
+        val file = video?.fileName ?: ""
+        return "$filesDir$file"
+    }
 
 
     inner class ServerController() {
         suspend fun getJwt() {
+            connectionState.postValue(ConnectionState.WORKING)
             val response = serverRepository.getJwt(User("foo", "foo"))
             if (response.isSuccessful) {
                 RetrofitInstance.jwt = JSONObject(response.body().toString()).getString("jwt")
             } else {
-                connectionState.value = ConnectionState.ERROR
+                connectionState.postValue(ConnectionState.ERROR)
             }
         }
 
-        suspend fun getServerVideoList() {
+        suspend fun getServerVideoList():  List<Video>{
+            connectionState.postValue(ConnectionState.WORKING)
             val response = serverRepository.getVideos()
             if (response.isSuccessful) {
-                serverVideoList.value = response.body()
+                return response.body() ?: emptyList()
             } else if (response.code() == 401 && connectionState.value != ConnectionState.ERROR401) {
-                connectionState.value = ConnectionState.ERROR401
+                connectionState.postValue(ConnectionState.ERROR401)
                 getJwt()
-                getServerVideoList()
+                return getServerVideoList()
             }
+            return emptyList()
         }
 
         fun downloadVideo(video: Video) {
-            val response = serverRepository.downloadVideo(video.id)
-            response.enqueue(object: Callback<ResponseBody> {
-                override fun onResponse(call: Call<ResponseBody>, response: Response<ResponseBody>) {
-                    if (response.isSuccessful){
-                        thread {
-                            val success = writeResponseBodyToDisk(response.body()!!, filesDir, video.fileName)
-                            Log.d(TAG, "downloadVideo: Video${video.id} download->$success")
-                            video.isDownloaded = true
-                            if (success) SqlController().addVideo(video)
-                        }
-                    }
-                }
-                override fun onFailure(call: Call<ResponseBody>, t: Throwable) {
-                    throw t
-                }
-
-            })
-
-
+            connectionState.postValue(ConnectionState.WORKING)
+            val response = serverRepository.downloadVideo(video.id).execute()
+            if (response.isSuccessful){
+                val success = writeResponseBodyToDisk(response.body()!!, filesDir, video.fileName)
+                if (success) SqlController().addVideo(video)
+            }
         }
 
         private fun writeResponseBodyToDisk(
@@ -124,7 +140,6 @@ class MainViewModel(private val serverRepository: ServerRepository, val sqlRepos
             fileName: String
         ): Boolean {
             return try {
-                Log.d(TAG, "writeResponseBodyToDisk: Start")
                 val videoFile = File( "$filesDir${File.separator}$fileName")
 
                 var inputStream: InputStream? = null
@@ -157,9 +172,23 @@ class MainViewModel(private val serverRepository: ServerRepository, val sqlRepos
                 false
             }
         }
+
+        suspend fun getVideoQueue(): Queue<Video>{
+            connectionState.postValue(ConnectionState.WORKING)
+            val response = serverRepository.getVideoQueue()
+            if (response.isSuccessful){
+                return (response.body() ?: emptyList<Video>()) as Queue<Video>
+            } else if (response.code() == 401 && connectionState.value != ConnectionState.ERROR401) {
+                connectionState.postValue(ConnectionState.ERROR401)
+                getJwt()
+                return getVideoQueue()
+            }
+            return LinkedList(listOf())
+        }
+
     }
 
-    inner class SqlController() {
+    inner class SqlController {
         fun addVideo(video: Video) {
             viewModelScope.launch {
                 sqlRepository.addVideo(video)
