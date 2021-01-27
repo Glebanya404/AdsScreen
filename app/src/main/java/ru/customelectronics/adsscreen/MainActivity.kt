@@ -1,6 +1,7 @@
 package ru.customelectronics.adsscreen
 
 import android.os.Bundle
+import android.os.Handler
 import android.util.Log
 import android.view.LayoutInflater
 import android.view.View
@@ -11,9 +12,6 @@ import androidx.lifecycle.*
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import kotlinx.android.synthetic.main.activity_main.*
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
 import ru.customelectronics.adsscreen.model.Video
 import ru.customelectronics.adsscreen.repository.ServerRepository
 import ru.customelectronics.adsscreen.repository.SqlRepository
@@ -26,10 +24,12 @@ import kotlin.concurrent.thread
 class MainActivity : AppCompatActivity() {
 
     private val TAG = javaClass.name
+    private val updateDelay = 1000 * 30.toLong()
     private val macAddress by lazy {
         getMacAddr()
     }
 
+    private val handler = Handler()
     private lateinit var viewModel: MainViewModel
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -87,7 +87,14 @@ class MainActivity : AppCompatActivity() {
         })
 
 
-        viewModel.checkServerUpdate()
+        val runnable = object : Runnable {
+            override fun run() {
+                Log.d(TAG, "run: Check server update")
+                viewModel.checkServerUpdate()
+                handler.postDelayed(this, updateDelay)
+            }
+        }
+        handler.post(runnable)
 
 
     }
@@ -103,7 +110,7 @@ class MainActivity : AppCompatActivity() {
                     //res1.append(Integer.toHexString(b & 0xFF) + ":");
                     res1.append(String.format("%02X:", b))
                 }
-                if (res1.length > 0) {
+                if (res1.isNotEmpty()) {
                     res1.deleteCharAt(res1.length - 1)
                 }
                 return res1.toString()

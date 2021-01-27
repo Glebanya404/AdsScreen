@@ -7,10 +7,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.launch
 import okhttp3.ResponseBody
-import retrofit2.Callback
 import org.json.JSONObject
-import retrofit2.Call
-import retrofit2.Response
 import ru.customelectronics.adsscreen.retrofit.RetrofitInstance
 import ru.customelectronics.adsscreen.model.User
 import ru.customelectronics.adsscreen.model.Video
@@ -19,8 +16,6 @@ import ru.customelectronics.adsscreen.repository.SqlRepository
 import java.io.*
 import java.lang.Exception
 import java.util.*
-import kotlin.concurrent.thread
-import kotlin.math.log
 
 class MainViewModel(private val serverRepository: ServerRepository, val sqlRepository: SqlRepository, val filesDir: String): ViewModel() {
 
@@ -47,6 +42,7 @@ class MainViewModel(private val serverRepository: ServerRepository, val sqlRepos
 
     fun checkServerUpdate() {
         CoroutineScope(Dispatchers.IO).launch {
+            if (connectionState.value == ConnectionState.WORKING) return@launch
             //If not connected trya to connect
             if (connectionState.value != ConnectionState.READY) {
                 try {
@@ -58,23 +54,33 @@ class MainViewModel(private val serverRepository: ServerRepository, val sqlRepos
                     return@launch
                 }
             }
+
             try {
                 Log.d(TAG, "checkServerUpdate: getServerVideoList")
                 serverVideoList.postValue(serverController.getServerVideoList())//Get current video list
-                Log.d(TAG, "checkServerUpdate: findNotDownloadedVideo")
-                val toDownloadVideoList = findNotDownloadedVideo()// Find new videos
+
+                Log.d(TAG, "checkServerUpdate: findVideosToDelete")
+                val toDeleteVideoList = findVideosToDelete()
+                for (video in toDeleteVideoList) {
+                    sqlController.deleteVideo(video)
+                    File("$filesDir${video.fileName}").delete()
+                }
+
+                Log.d(TAG, "checkServerUpdate: findNotDownloadedVideos")
+                val toDownloadVideoList = findNotDownloadedVideos()// Find new videos
+
                 Log.d(TAG, "checkServerUpdate: Download videos")
-                Log.d(TAG, "checkServerUpdate: $toDownloadVideoList")
                 for (video in toDownloadVideoList) {
                     val async = async {
                         Log.d(TAG, "checkServerUpdate: Start download ${video.title}")
                         serverController.downloadVideo(video)//Download each new video
                     }
+
                     Log.d(TAG, "checkServerUpdate: Waiting")
                     async.await()
                 }
-                defaultQueue.postValue(serverController.getVideoQueue())
 
+                defaultQueue.postValue(serverController.getVideoQueue())
                 connectionState.postValue(ConnectionState.READY)
             } catch (e: Exception) {
                 connectionState.postValue(ConnectionState.ERROR)
@@ -84,10 +90,16 @@ class MainViewModel(private val serverRepository: ServerRepository, val sqlRepos
         }
     }
 
+    private fun findVideosToDelete(): List<Video> {
+        if (sqlVideoList.value == null || sqlVideoList.value!!.isEmpty()) return emptyList()
+        if (serverVideoList.value == null || serverVideoList.value!!.isEmpty()) return sqlVideoList.value ?: emptyList()
+        return sqlVideoList.value!!.filter { !serverVideoList.value!!.contains(it)}
+    }
 
-    private fun findNotDownloadedVideo(): List<Video> {
+
+    private fun findNotDownloadedVideos(): List<Video> {
         if (serverVideoList.value == null || serverVideoList.value!!.isEmpty()) return emptyList()
-        if (sqlVideoList.value == null || sqlVideoList.value!!.isEmpty()) return serverVideoList.value!!
+        if (sqlVideoList.value == null || sqlVideoList.value!!.isEmpty()) return serverVideoList.value ?: emptyList()
         return serverVideoList.value!!.filter { !sqlVideoList.value!!.contains(it)}
     }
 
@@ -101,7 +113,7 @@ class MainViewModel(private val serverRepository: ServerRepository, val sqlRepos
     }
 
 
-    inner class ServerController() {
+    inner class ServerController {
         suspend fun getJwt() {
             connectionState.postValue(ConnectionState.WORKING)
             val response = serverRepository.getJwt(User("foo", "foo"))
@@ -149,6 +161,7 @@ class MainViewModel(private val serverRepository: ServerRepository, val sqlRepos
                     val fileReader = ByteArray(4096)
                     val fileSize = body.contentLength()
                     var fileSizeDownloaded: Long = 0
+                    var fileDownloadedPercent = 0
 
                     inputStream = body.byteStream()
                     outputStream = FileOutputStream(videoFile)
@@ -158,7 +171,10 @@ class MainViewModel(private val serverRepository: ServerRepository, val sqlRepos
                         if (read == -1)break
                         outputStream.write(fileReader, 0, read)
                         fileSizeDownloaded+=read
-                        Log.d(TAG, "writeResponseBodyToDisk: File download: $fileSizeDownloaded of $fileSize")
+                        if (fileSizeDownloaded > fileSize/100*fileDownloadedPercent){
+                            fileDownloadedPercent++
+                            Log.d(TAG, "writeResponseBodyToDisk: File download: $fileDownloadedPercent%")
+                        }
                     }
                     outputStream.flush()
                     true
@@ -193,6 +209,10 @@ class MainViewModel(private val serverRepository: ServerRepository, val sqlRepos
             viewModelScope.launch {
                 sqlRepository.addVideo(video)
             }
+        }
+
+        suspend fun deleteVideo(video: Video) {
+            sqlRepository.delete(video)
         }
     }
 

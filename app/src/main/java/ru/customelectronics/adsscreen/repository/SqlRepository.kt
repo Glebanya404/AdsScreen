@@ -10,5 +10,9 @@ class SqlRepository(private val videoDao: VideoDao) {
     suspend fun addVideo(video: Video){
         videoDao.insertAll(video)
     }
+
+    suspend fun delete(video: Video) {
+        videoDao.delete(video)
+    }
 }
 
