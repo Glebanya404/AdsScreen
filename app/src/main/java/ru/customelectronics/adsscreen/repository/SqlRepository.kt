@@ -28,5 +28,9 @@ class SqlRepository(private val videoDao: VideoDao,private val urlDao: UrlDao) {
         urlDao.delete(url)
     }
 
+    fun deleteAllUrl() {
+        urlDao.deleteAll()
+    }
+
 }
 

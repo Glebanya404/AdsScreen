@@ -52,29 +52,25 @@ class MainViewModel(private val serverRepository: ServerRepository, val sqlRepos
             }
 
             try {
-                Log.d(TAG, "checkServerUpdate: getServerVideoList")
                 serverVideoList.postValue(serverController.getServerVideoList())//Get current video list
 
-                Log.d(TAG, "checkServerUpdate: findVideosToDelete")
                 val toDeleteVideoList = findVideosToDelete()//Delete old videos
                 for (video in toDeleteVideoList) {
                     sqlController.deleteVideo(video)
                     File("$filesDir${video.fileName}").delete()
                 }
 
-                Log.d(TAG, "checkServerUpdate: findNotDownloadedVideos")
                 val toDownloadVideoList = findNotDownloadedVideos()// Find new videos
-
-                Log.d(TAG, "checkServerUpdate: Download videos")
                 for (video in toDownloadVideoList) {
                     val async = async {
                         Log.d(TAG, "checkServerUpdate: Start download ${video.title}")
                         serverController.downloadVideo(video)//Download each new video
                     }
-
-                    Log.d(TAG, "checkServerUpdate: Waiting")
                     async.await()
                 }
+
+                val serverUrlList = serverController.getUrlList()
+                sqlController.replaceUrlList(serverUrlList)
 
                 defaultQueue.postValue(serverController.getVideoQueue())
                 connectionState.postValue(ConnectionState.READY)
@@ -115,7 +111,6 @@ class MainViewModel(private val serverRepository: ServerRepository, val sqlRepos
     inner class ServerController {
         fun getJwt(): Boolean {
             connectionState.postValue(ConnectionState.WORKING)
-            Log.d(TAG, "getJwt: ")
             val response = serverRepository.getJwt(User("foo", "foo")).execute()
             if (response.isSuccessful) {
                 RetrofitInstance.jwt = JSONObject(response.body().toString()).getString("jwt")
@@ -228,6 +223,14 @@ class MainViewModel(private val serverRepository: ServerRepository, val sqlRepos
             RetrofitInstance.setNewUrl(url)
         }
 
+        suspend fun getUrlList(): List<Url> {
+            val response = serverRepository.getUrlList()
+            if (response.isSuccessful) {
+                return response.body() ?: emptyList()
+            }
+            return emptyList()
+        }
+
     }
 
 
@@ -243,6 +246,13 @@ class MainViewModel(private val serverRepository: ServerRepository, val sqlRepos
 
         suspend fun addUrl(url: Url){
             sqlRepository.addUrl(url)
+        }
+
+        suspend fun replaceUrlList(serverUrlList: List<Url>) {
+            sqlRepository.deleteAllUrl()
+            for (url in serverUrlList){
+                sqlRepository.addUrl(url)
+            }
         }
     }
 

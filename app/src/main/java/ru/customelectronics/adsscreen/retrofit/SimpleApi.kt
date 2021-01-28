@@ -5,6 +5,7 @@ import okhttp3.ResponseBody
 import retrofit2.Call
 import retrofit2.Response
 import retrofit2.http.*
+import ru.customelectronics.adsscreen.model.Url
 import ru.customelectronics.adsscreen.model.User
 import ru.customelectronics.adsscreen.model.Video
 import java.util.*
@@ -30,5 +31,8 @@ interface SimpleApi {
 
     @GET("api/getQueue")
     suspend fun getVideoQueue( @Query("macAddr") macAddr: String): Response<Queue<Video>>
+
+    @GET("api/getUrlList")
+    suspend fun getUrlList(): Response<List<Url>>
 
 }

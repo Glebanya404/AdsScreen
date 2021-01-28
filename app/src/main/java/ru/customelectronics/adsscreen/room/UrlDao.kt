@@ -15,4 +15,7 @@ interface UrlDao {
 
     @Delete
     fun delete(url: Url)
+
+    @Query("DELETE FROM url_table")
+    fun deleteAll()
 }
