@@ -15,11 +15,11 @@ import kotlinx.android.synthetic.main.activity_main.*
 import ru.customelectronics.adsscreen.model.Video
 import ru.customelectronics.adsscreen.repository.ServerRepository
 import ru.customelectronics.adsscreen.repository.SqlRepository
+import ru.customelectronics.adsscreen.retrofit.RetrofitInstance
 import ru.customelectronics.adsscreen.room.AppDatabase
 import java.io.File
 import java.net.NetworkInterface
 import java.util.*
-import kotlin.concurrent.thread
 
 class MainActivity : AppCompatActivity() {
 
@@ -37,11 +37,12 @@ class MainActivity : AppCompatActivity() {
         setContentView(R.layout.activity_main)
 
         val videoDao = AppDatabase.getDatabase(applicationContext).videoDao()
-        val viewModelFactory = MainViewModelFactory(ServerRepository(macAddress), SqlRepository(videoDao), "${getExternalFilesDir(null)}${File.separator}")
+        val urlDao = AppDatabase.getDatabase(applicationContext).urlDao()
+        val viewModelFactory = MainViewModelFactory(ServerRepository(macAddress), SqlRepository(videoDao, urlDao), "${getExternalFilesDir(null)}${File.separator}")
         viewModel = ViewModelProvider(this, viewModelFactory).get(MainViewModel::class.java)
 
         activity_main__macAddress_textView.text = macAddress
-        activity_main__connStatus_textView.text = "Status:Not connected"
+        activity_main__connStatus_textView.text = "Status:"
         activity_main__videoList_recyclerView.layoutManager = LinearLayoutManager(this)
         val adapter = VideoAdapter()
         activity_main__videoList_recyclerView.adapter = adapter
@@ -78,6 +79,11 @@ class MainActivity : AppCompatActivity() {
             }
             adapter.setVideoList(videoList)
         })
+        viewModel.sqlUrlList.observe(this, { urlList ->
+            for (url in urlList) {
+                Log.d(TAG, "onCreate: From SQL of Url: $url")
+            }
+        })
         viewModel.defaultQueue.observe(this, {
             if (activity_main__videoView.duration == -1 && viewModel.defaultQueue.value?.size != 0) {
                 activity_main__videoView.setVideoPath(viewModel.getNextVideo())
@@ -94,7 +100,7 @@ class MainActivity : AppCompatActivity() {
                 handler.postDelayed(this, updateDelay)
             }
         }
-        handler.post(runnable)
+        handler.postDelayed(runnable, 1000 * 5L)
 
 
     }

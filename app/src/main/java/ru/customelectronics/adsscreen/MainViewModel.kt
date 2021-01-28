@@ -8,6 +8,7 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.launch
 import okhttp3.ResponseBody
 import org.json.JSONObject
+import ru.customelectronics.adsscreen.model.Url
 import ru.customelectronics.adsscreen.retrofit.RetrofitInstance
 import ru.customelectronics.adsscreen.model.User
 import ru.customelectronics.adsscreen.model.Video
@@ -34,7 +35,8 @@ class MainViewModel(private val serverRepository: ServerRepository, val sqlRepos
     val serverVideoList: MutableLiveData<List<Video>> = MutableLiveData()
     var defaultQueue: MutableLiveData<Queue<Video>> = MutableLiveData()
     var currentQueue: Queue<Video> = LinkedList(listOf())
-    var sqlVideoList = sqlRepository.getAll
+    var sqlVideoList = sqlRepository.getAllVideos
+    var sqlUrlList = sqlRepository.getAllUrls
 
     val TAG = javaClass.name
 
@@ -43,16 +45,10 @@ class MainViewModel(private val serverRepository: ServerRepository, val sqlRepos
     fun checkServerUpdate() {
         CoroutineScope(Dispatchers.IO).launch {
             if (connectionState.value == ConnectionState.WORKING) return@launch
+
             //If not connected trya to connect
             if (connectionState.value != ConnectionState.READY) {
-                try {
-                    serverController.getJwt()
-                } catch (e: Exception) {
-                    connectionState.postValue(ConnectionState.ERROR)
-//                    throw e
-                    e.printStackTrace()
-                    return@launch
-                }
+                if (!serverController.connect()) return@launch
             }
 
             try {
@@ -60,7 +56,7 @@ class MainViewModel(private val serverRepository: ServerRepository, val sqlRepos
                 serverVideoList.postValue(serverController.getServerVideoList())//Get current video list
 
                 Log.d(TAG, "checkServerUpdate: findVideosToDelete")
-                val toDeleteVideoList = findVideosToDelete()
+                val toDeleteVideoList = findVideosToDelete()//Delete old videos
                 for (video in toDeleteVideoList) {
                     sqlController.deleteVideo(video)
                     File("$filesDir${video.fileName}").delete()
@@ -90,6 +86,8 @@ class MainViewModel(private val serverRepository: ServerRepository, val sqlRepos
         }
     }
 
+
+
     private fun findVideosToDelete(): List<Video> {
         if (sqlVideoList.value == null || sqlVideoList.value!!.isEmpty()) return emptyList()
         if (serverVideoList.value == null || serverVideoList.value!!.isEmpty()) return sqlVideoList.value ?: emptyList()
@@ -113,15 +111,36 @@ class MainViewModel(private val serverRepository: ServerRepository, val sqlRepos
     }
 
 
+
     inner class ServerController {
-        suspend fun getJwt() {
+        fun getJwt(): Boolean {
             connectionState.postValue(ConnectionState.WORKING)
-            val response = serverRepository.getJwt(User("foo", "foo"))
+            Log.d(TAG, "getJwt: ")
+            val response = serverRepository.getJwt(User("foo", "foo")).execute()
             if (response.isSuccessful) {
                 RetrofitInstance.jwt = JSONObject(response.body().toString()).getString("jwt")
+                return true
             } else {
-                connectionState.postValue(ConnectionState.ERROR)
+                return false
             }
+        }
+
+        fun connect(): Boolean {
+            try {
+                serverController.getJwt()
+            } catch (e: Exception) {
+                e.printStackTrace()
+                for (url in sqlUrlList.value ?: emptyList()) {
+                    serverController.changeUrl(url.url)
+                    try {
+                        if (serverController.getJwt()) return true
+                    } catch (e: Exception) { e.printStackTrace() }
+                }
+                connectionState.postValue(ConnectionState.ERROR)
+                e.printStackTrace()
+                return false
+            }
+            return true
         }
 
         suspend fun getServerVideoList():  List<Video>{
@@ -137,7 +156,7 @@ class MainViewModel(private val serverRepository: ServerRepository, val sqlRepos
             return emptyList()
         }
 
-        fun downloadVideo(video: Video) {
+        suspend fun downloadVideo(video: Video) {
             connectionState.postValue(ConnectionState.WORKING)
             val response = serverRepository.downloadVideo(video.id).execute()
             if (response.isSuccessful){
@@ -152,7 +171,8 @@ class MainViewModel(private val serverRepository: ServerRepository, val sqlRepos
             fileName: String
         ): Boolean {
             return try {
-                val videoFile = File( "$filesDir${File.separator}$fileName")
+                val file = File( "$filesDir${File.separator}$fileName")
+                if (file.length() != 0L)file.delete()
 
                 var inputStream: InputStream? = null
                 var outputStream: OutputStream? = null
@@ -164,16 +184,17 @@ class MainViewModel(private val serverRepository: ServerRepository, val sqlRepos
                     var fileDownloadedPercent = 0
 
                     inputStream = body.byteStream()
-                    outputStream = FileOutputStream(videoFile)
+                    outputStream = FileOutputStream(file)
 
                     while (true) {
                         val read = inputStream.read(fileReader)
                         if (read == -1)break
                         outputStream.write(fileReader, 0, read)
                         fileSizeDownloaded+=read
-                        if (fileSizeDownloaded > fileSize/100*fileDownloadedPercent){
-                            fileDownloadedPercent++
+                        if (fileSizeDownloaded >= fileSize/100*fileDownloadedPercent){
                             Log.d(TAG, "writeResponseBodyToDisk: File download: $fileDownloadedPercent%")
+                            fileDownloadedPercent++
+//                            Log.d(TAG, "writeResponseBodyToDisk: File download: $fileSizeDownloaded of $fileSize")
                         }
                     }
                     outputStream.flush()
@@ -202,17 +223,26 @@ class MainViewModel(private val serverRepository: ServerRepository, val sqlRepos
             return LinkedList(listOf())
         }
 
+        fun changeUrl(url: String) {
+            Log.d(TAG, "changeUrl: To $url")
+            RetrofitInstance.setNewUrl(url)
+        }
+
     }
 
+
     inner class SqlController {
-        fun addVideo(video: Video) {
-            viewModelScope.launch {
-                sqlRepository.addVideo(video)
-            }
+
+        suspend fun addVideo(video: Video) {
+            sqlRepository.addVideo(video)
         }
 
         suspend fun deleteVideo(video: Video) {
-            sqlRepository.delete(video)
+            sqlRepository.deleteVideo(video)
+        }
+
+        suspend fun addUrl(url: Url){
+            sqlRepository.addUrl(url)
         }
     }
 

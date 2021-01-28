@@ -5,6 +5,14 @@ plugins {
 }
 
 android {
+    signingConfigs {
+        config {
+            storeFile file('D:\\Android\\sign.jks')
+            keyPassword 'Usver3669'
+            storePassword 'Usver3669'
+            keyAlias 'customelectronics.ru'
+        }
+    }
     compileSdkVersion 29
     buildToolsVersion "30.0.2"
 
@@ -16,6 +24,7 @@ android {
         versionName "1.0"
 
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
+        signingConfig signingConfigs.config
     }
 
     buildTypes {

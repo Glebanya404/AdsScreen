@@ -16,7 +16,7 @@ class ServerRepository(private val macAddr: String) {
     }
 
 
-    suspend fun getJwt(user: User): Response<JsonObject> {
+    fun getJwt(user: User): Call<JsonObject> {
         return RetrofitInstance.api.getJwt(macAddr,user)
     }
 

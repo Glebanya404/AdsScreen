@@ -23,10 +23,10 @@ interface SimpleApi {
 
 
     @POST("api/authenticate")
-    suspend fun getJwt(
+    fun getJwt(
         @Query("macAddr") macAddr: String,
         @Body user: User
-    ): Response<JsonObject>
+    ): Call<JsonObject>
 
     @GET("api/getQueue")
     suspend fun getVideoQueue( @Query("macAddr") macAddr: String): Response<Queue<Video>>
